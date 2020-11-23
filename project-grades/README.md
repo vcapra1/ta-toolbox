@@ -1,0 +1,56 @@
+# project-grades
+
+Use this for computing project grades because Gradescope can't do stuff like extensions, late penalties, etc.
+
+# Compiling
+
+Run `make` in this directory to compile the binary and copy it to this directory.
+
+## Usage
+
+```
+USAGE:
+    rust-grader [OPTIONS] --canonical <NAME> --due-date <YYYY-MM-DD HH:MM +/-ZZZZ> --output-dir <DIR> --roster <FILE> --submissions <FILE>...
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -c, --canonical <NAME>                          The name of the submitter of the canonical solution
+    -d, --due-date <YYYY-MM-DD HH:MM +/-ZZZZ>    Specify the project's due date
+    -e, --extensions <FILE>                         A CSV file of extensions, in the format UID,Hours
+    -l, --late-period <HOURS>
+            The additional time students had to submit projects for late credit [default: 24.0]
+
+    -o, --output-dir <DIR>                          Directory to put the output files in.
+    -r, --roster <FILE>                             Specify the student roster to use
+    -i, --student <UID>...
+            Specify a student for whom to calculuate the project grade. If omitted, all grades are computed
+
+    -s, --submissions <FILE>...                     The submission_metadata.yml file downloaded from Gradescope
+```
+
+## Example
+
+```bash
+./rust-grader --due-date "2020-02-11 23:59 -0500" --roster roster.csv --submissions p1/submission_metadata.yml --submissions p1/extended.yml --extensions p1/extensions.csv --canonical "Vincent Caprarola" -o p1
+```
+
+This will read two `submission_metadata.yml` files (one for the extended version), a list of extensions (`extensions.csv`), and output into the `p1` directory.  When specifying the due date you have to specify the time zone (e.g. `-0500`), which should be the same as the one on Gradescope in the project settings.
+
+The canonical should be a known working submission (should be a submission by an instructor/TA).  Test names must be unique (this is a limitation of the grades server).
+
+Also, to just compute a single student's grades, add an option `--student` with their UID, for example: `--student 123456789`.
+
+## Rosters
+
+The format for the roster CSV is below:
+
+```csv
+UID,DID,Name
+123456789,umdterp,"Full Name"
+987654321,testudo,"Testudo"
+```
+
+You can use the roster tool in this repository to generate rosters of this format.

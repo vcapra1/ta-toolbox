@@ -1,0 +1,59 @@
+name: rust-grader
+version: "0.1"
+author: Vinnie Caprarola <vinnie@vcaprarola.me>
+args:
+    - roster:
+        short: r
+        long: roster
+        value_name: FILE
+        help: Specify the student roster to use
+        takes_value: true
+        required: true
+    - due_date:
+        short: d
+        long: due-date
+        value_name: YYYY-MM-DD HH:MM +/-ZZZZ
+        help: Specify the project's due date
+        required: true
+    - submissions:
+        short: s
+        long: submissions
+        value_name: FILE
+        help: The submission_metadata.yml file downloaded from Gradescope
+        required: true
+        multiple: true
+    - extensions:
+        short: e
+        long: extensions
+        value_name: FILE
+        help: A CSV file of extensions, in the format UID,Hours
+    - late_period:
+        short: l
+        long: late-period
+        value_name: HOURS
+        help: The additional time students had to submit projects for late credit
+        required: false
+        default_value: "24.0"
+    - canonical:
+        short: c
+        long: canonical
+        value_name: NAME
+        help: The name of the submitter of the canonical solution
+        required: true
+    - output:
+        short: o
+        long: output-dir
+        value_name: DIR
+        help: Directory to put the output files in.
+        required: true
+    - student:
+        short: i
+        long: student
+        value_name: UID
+        help: Specify a student for whom to calculuate the project grade. If omitted, all grades are computed
+        required: false
+        multiple: true
+    - gfa:
+        short: g
+        long: gfa
+        help: Run in GFA mode (output a list of students and whether or not they failed the GFA)

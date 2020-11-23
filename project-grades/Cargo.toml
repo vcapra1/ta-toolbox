@@ -1,0 +1,14 @@
+[package]
+name = "rust-grader"
+version = "0.1.0"
+authors = ["Vinnie Caprarola <vinnie@vcaprarola.me>"]
+edition = "2018"
+
+[dependencies]
+yaml-rust = "0.4"
+csv = "1.1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.8"
+clap = { version = "2.33", features = ["yaml"] }
+chrono = "0.4"
+time = "0.2"
