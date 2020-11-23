@@ -1,15 +1,14 @@
 # project-grades
 
-Use this for computing project grades because Gradescope can't do stuff like extensions, late penalties, etc.
-
-# Compiling
-
-Run `make` in this directory to compile the binary and copy it to this directory.
+Use this for computing project grades because Gradescope can't do stuff like extensions, late penalties, etc.  The first step is to export submissions from Gradescope.  The only file from this you need is `submission_metadata.yml`, but you have to download all the submissions to get this file.
 
 ## Usage
 
 ```
 USAGE:
+    cargo run -- [OPTIONS] --canonical <NAME> --due-date <YYYY-MM-DD HH:MM +/-ZZZZ> --output-dir <DIR> --roster <FILE> --submissions <FILE>...
+
+  or, if you just have the binary:
     rust-grader [OPTIONS] --canonical <NAME> --due-date <YYYY-MM-DD HH:MM +/-ZZZZ> --output-dir <DIR> --roster <FILE> --submissions <FILE>...
 
 FLAGS:
@@ -42,6 +41,8 @@ This will read two `submission_metadata.yml` files (one for the extended version
 The canonical should be a known working submission (should be a submission by an instructor/TA).  Test names must be unique (this is a limitation of the grades server).
 
 Also, to just compute a single student's grades, add an option `--student` with their UID, for example: `--student 123456789`.
+
+You might get a warning about irregular test states (e.g. testing harness started).  This means at the time of export, that test was still running and had not finished.  These submissions will be ignored.  If you want those submissions to be included, wait for them to finish testing and re-export the submissions.
 
 ## Rosters
 
