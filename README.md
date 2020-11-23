@@ -14,10 +14,10 @@ Use this for computing project grades because Gradescope can't do stuff like ext
 
 Use this for formatting the UMEG course roster(s) into more useful and readable formats.
 
-# gradescope-grading-stats
+## gradescope-grading-stats
 
 Track TA's grading progress on Gradescope online assignments and exams.
 
-# autograder-images
+## autograder-images
 
 This repository contains base Docker images for setting up projects (Ruby, OCaml, Rust) for the Gradescope Autograder, and some example project setups.
