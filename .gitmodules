@@ -1,0 +1,3 @@
+[submodule "autograder-images"]
+	path = autograder-images
+	url = git@github.com:vcapra1/gradescope-autograder-images.git
