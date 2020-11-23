@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use std::fs::File;
 use std::io::Write;
 
-fn main() -> Result<(), Box<std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     /* Match the command line arguments */
     let yaml = load_yaml!("args.yml");
     let args = App::from_yaml(yaml).get_matches();

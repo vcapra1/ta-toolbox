@@ -25,7 +25,7 @@ pub enum Error {
 }
 
 impl Roster {
-    pub fn load(file: &str) -> Result<Roster, Box<std::error::Error>> {
+    pub fn load(file: &str) -> Result<Roster, Box<dyn std::error::Error>> {
         let mut rdr = csv::Reader::from_reader(File::open(file)?);
         Ok(Roster(rdr.deserialize().map(|record| record.unwrap()).collect()))
     }

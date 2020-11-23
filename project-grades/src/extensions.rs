@@ -1,7 +1,7 @@
 use std::fs::File;
 use crate::roster::*;
 
-pub fn load(roster: &mut Roster, file: &str) -> Result<(), Box<std::error::Error>> {
+pub fn load(roster: &mut Roster, file: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut rdr = csv::Reader::from_reader(File::open(file)?);
     for record in rdr.records() {
         let record = record?;
