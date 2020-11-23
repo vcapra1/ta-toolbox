@@ -54,4 +54,4 @@ UID,DID,Name
 987654321,testudo,"Testudo"
 ```
 
-You can use the roster tool in this repository to generate rosters of this format.
+You can use the roster tool in this repository to generate rosters of this format (use the `roster-idmap.csv` file).
