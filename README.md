@@ -13,3 +13,7 @@ Use this for computing project grades because Gradescope can't do stuff like ext
 ## rosters
 
 Use this for formatting the UMEG course roster(s) into more useful and readable formats.
+
+# gradescope-grading-stats
+
+Track TA's grading progress on Gradescope online assignments and exams.
