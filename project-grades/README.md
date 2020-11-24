@@ -55,3 +55,18 @@ UID,DID,Name
 ```
 
 You can use the roster tool in this repository to generate rosters of this format (use the `roster-idmap.csv` file).
+
+## Extensions
+
+If there are extensions, you can supply them to the program with a CSV.  It should consist of two columns: student ID and number of hours for the extension (without a header).  For example:
+
+```csv
+123456789,24
+987654321,72
+```
+
+This gives the first student a 1-day extension and the second a 3-day extension.
+
+## Notes
+
+- The program considers assignments submitted up to 5 minutes after the deadline to be on-time.  This is because Gradescope does not mark assignments as "Late" if they are submitted within 5 minutes after the deadline.
