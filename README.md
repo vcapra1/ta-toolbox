@@ -21,3 +21,7 @@ Track TA's grading progress on Gradescope online assignments and exams.
 ## autograder-images
 
 This repository contains base Docker images for setting up projects (Ruby, OCaml, Rust) for the Gradescope Autograder, and some example project setups.
+
+## swipe-attendance
+
+Take attendance more easily during exams by swiping the ID cards.
