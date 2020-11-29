@@ -58,9 +58,10 @@ You can use the roster tool in this repository to generate rosters of this forma
 
 ## Extensions
 
-If there are extensions, you can supply them to the program with a CSV.  It should consist of two columns: student ID and number of hours for the extension (without a header).  For example:
+If there are extensions, you can supply them to the program with a CSV.  It should consist of two columns: student ID and number of hours for the extension.  For example:
 
 ```csv
+UID,Hours
 123456789,24
 987654321,72
 ```
