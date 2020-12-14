@@ -25,3 +25,7 @@ This repository contains base Docker images for setting up projects (Ruby, OCaml
 ## swipe-attendance
 
 Take attendance more easily during exams by swiping the ID cards.
+
+## tutorials
+
+A general list of useful how-tos that don't necessarily require any additional tools, but may not be intuitive or straightforward.
