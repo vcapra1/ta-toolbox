@@ -19,6 +19,9 @@ OPTIONS:
     -c, --canonical <NAME>                          The name of the submitter of the canonical solution
     -d, --due-date <YYYY-MM-DD HH:MM +/-ZZZZ>    Specify the project's due date
     -e, --extensions <FILE>                         A CSV file of extensions, in the format UID,Hours
+    -p, --late-penalty <PENALTY>
+            The penalty to apply to late submissions, expressed as a percentage (omit % sign) [default: 10.0]
+
     -l, --late-period <HOURS>
             The additional time students had to submit projects for late credit [default: 24.0]
 
