@@ -76,7 +76,7 @@ impl Student {
         let due_date = due_date + Duration::minutes((self.extension * 60.0) as i64 + 5);
 
         /* Get this student's late due date */
-        let late_due_date = due_date + Duration::minutes((late_period * 60.5) as i64);
+        let late_due_date = due_date + Duration::minutes((late_period * 60.0) as i64);
 
         /* Partition the submissions into groups based on the time they were submitted */
         let mut on_time_subs = Vec::new();
