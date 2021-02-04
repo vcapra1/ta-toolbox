@@ -102,16 +102,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         /* Get the due date */
         let due_date = DateTime::parse_from_str(args.value_of("due_date").unwrap(), "%Y-%m-%d %H:%M %z").unwrap().with_timezone(&Utc);
 
+        /* Get the late penalty and period */
+        let late_penalty = args.value_of("late_penalty").unwrap().parse::<f64>().unwrap() / 100.;
+        let late_period = args.value_of("late_period").unwrap().parse::<f64>().unwrap();
+
         /* Get best submission for each student */
         let mut file = File::create(format!("{}/grades.csv", args.value_of("output").unwrap()))?;
         for student in roster.0.iter() {
-            if let Some((best, is_late)) = student.best_submission(0.1, due_date) {
-                /* Yeet that to standard out */
+            if let Some((best, is_late)) = student.best_submission(late_penalty, late_period, due_date) {
+                /* Write submission scores to file */
                 write!(file, "{}", best)?;
 
                 /* If late, say so */
                 if is_late {
-                    write!(file, "{},*,*0.9,Late\n", student.directory_id)?;
+                    write!(file, "{},*,*{},Late\n", 1. - late_penalty, student.directory_id)?;
                 } else {
                     write!(file, "{},*,*1,\n", student.directory_id)?;
                 }

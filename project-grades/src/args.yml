@@ -34,6 +34,12 @@ args:
         help: The additional time students had to submit projects for late credit
         required: false
         default_value: "24.0"
+    - late_penalty:
+        short: p
+        long: late-penalty
+        value_name: PENALTY
+        help: The penalty to apply to late submissions, expressed as a percentage (omit % sign)
+        default_value: "10.0"
     - canonical:
         short: c
         long: canonical
