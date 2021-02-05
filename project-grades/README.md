@@ -52,12 +52,12 @@ You might get a warning about irregular test states (e.g. testing harness starte
 The format for the roster CSV is below:
 
 ```csv
-UID,DID,Name
-123456789,umdterp,"Full Name"
-987654321,testudo,"Testudo"
+UID,DID
+123456789,umdterp
+987654321,testudo
 ```
 
-You can use the roster tool in this repository to generate rosters of this format (use the `roster-idmap.csv` file).
+You can use the roster tool in this repository to generate rosters of this format (use the `roster-idmap.csv` file).  Note that this generated CSV file will also include a "Name" column, but it will still work as that column is optional.
 
 ## Extensions
 

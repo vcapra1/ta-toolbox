@@ -8,7 +8,7 @@ pub struct Roster(pub Vec<Student>);
 #[derive(Deserialize)]
 pub struct Student {
     #[serde(rename = "Name")]
-    pub name: String,
+    pub name: Option<String>,
     #[serde(rename = "UID")]
     pub university_id: String,
     #[serde(rename = "DID")]
