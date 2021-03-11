@@ -1,151 +1,179 @@
-extern crate csv;
-#[macro_use]
-extern crate clap;
 extern crate serde;
-extern crate chrono;
-extern crate time;
+extern crate csv;
+extern crate clap;
 
 mod roster;
 mod extensions;
 mod submissions;
 
 use roster::*;
-use clap::App;
-use chrono::{DateTime, Utc};
-use std::fs::File;
-use std::io::Write;
+use extensions::*;
+use submissions::*;
+use std::{fs::File, io::Write, collections::HashMap};
+use chrono::{DateTime, Utc, Duration};
+use clap::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /* Match the command line arguments */
+fn main() {
+    // Load command-line args
     let yaml = load_yaml!("args.yml");
     let args = App::from_yaml(yaml).get_matches();
 
-    /* Get roster data */
-    eprintln!("[*] Loading roster");
-    let mut roster = Roster::load(args.value_of("roster").unwrap())?;
+    // Load the roster
+    let roster = Roster::load(args.value_of("roster").unwrap()).unwrap();
 
-    /* Get extension data and update roster */
-    if let Some(ref file) = args.value_of("extensions") {
-        extensions::load(&mut roster, file)?;
-    }
-
-    /* Get submissions */
-    eprintln!("[*] Loading submissions");
+    // Load all of the submissions
     let submissions = {
-        /* List to add all submissions to */
-        let mut submissions = Vec::new();
+        let mut submissions = SubmissionSet::new(&roster);
 
-        /* Load each submission file */
         for in_file in args.values_of("submissions").unwrap() {
-            let count = submissions::load(&mut submissions, in_file)?;
-            eprintln!("[*] {} submissions loaded from {}", count, in_file);
+            submissions.load(in_file).unwrap();
         }
 
         submissions
     };
 
-    /* Get the list of tests from the canonical submission */
-    let tests = match submissions.iter().find(|sub| {
-        sub.student_name == args.value_of("canonical").unwrap() && sub.was_activated
-    }) {
-        Some(t) => t.tests.clone(),
-        None => {
-            panic!("[!] No active submission found for the canonical account");
-        }
-    };
-
-    /* Get list of students to include */
-    let students_to_include = if let Some(students) = args.values_of("student") {
-        Some(students.map(|x| {
-            x.to_string()
-        }).collect::<Vec<_>>())
+    // Load the extensions
+    let extensions = if let Some(extensions_file) = args.value_of("extensions") {
+        ExtensionSet::load(extensions_file).unwrap()
     } else {
-        None
+        ExtensionSet::empty()
     };
 
-    /* Associate all submissions with a student */
-    eprintln!("[*] Associating submissions with students");
-    'outer: for submission in submissions {
-//        println!("{}", submission.submission_id);
-        /* Make sure the submissions test cases match the canonical's */
-        for test in tests.iter() {
-            if let Some(sub_test) = submission.tests.iter().find(|t| t.name == test.name) {
-                if sub_test.max != test.max {
-                    eprintln!("[!] Test {} point value incorrect for submission {}", test.name, submission.submission_id);
-                    continue 'outer;
-                }
-            } else {
-                /* Test not found */
-                eprintln!("[!] Test {} not found for submission {} ({})", test.name, submission.submission_id, submission.time);
-                continue 'outer;
-            }
-        }
+    // Load the deadlines
+    let deadlines = {
+        let mut deadlines = Vec::new();
 
-        /* Get student ID for submission */
-        let student_id = submission.student_id.clone();
-
-        /* Check if specified */
-        if let Some(ref students_to_include) = students_to_include {
-            if !students_to_include.contains(&student_id) {
-                continue;
-            }
-        }
-
-        /* Add the submission */
-        match roster.add_submission(submission) {
-            Ok(_) => (),
-            Err(_) => eprintln!("[!] Could not find student with id \"{}\"", student_id),
-        }
-    }
-
-    if !args.is_present("gfa") {
-        /* Get the due date */
+        // The first entry is just the normal deadline
         let due_date = DateTime::parse_from_str(args.value_of("due_date").unwrap(), "%Y-%m-%d %H:%M %z").unwrap().with_timezone(&Utc);
+        deadlines.push((due_date, 0.));
 
-        /* Get the late penalty and period */
-        let late_penalty = args.value_of("late_penalty").unwrap().parse::<f64>().unwrap() / 100.;
-        let late_period = args.value_of("late_period").unwrap().parse::<f64>().unwrap();
+        // Add the remaining deadlines
+        for deadline in args.values_of("deadline").unwrap() {
+            let parts: Vec<_> = deadline.split(",").collect();
+            if parts.len() != 2 {
+                panic!("Invalid format for arg \"deadline\": {}", deadline);
+            }
 
-        /* Get best submission for each student */
-        let mut file = File::create(format!("{}/grades.csv", args.value_of("output").unwrap()))?;
-        for student in roster.0.iter() {
-            if let Some((best, is_late)) = student.best_submission(late_penalty, late_period, due_date) {
-                /* Write submission scores to file */
-                write!(file, "{}", best)?;
+            // Get the hours and penalty
+            let hours = parts[0].parse::<u32>().unwrap();
+            let penalty = parts[1].parse::<f64>().unwrap();
 
-                /* If late, say so */
-                if is_late {
-                    write!(file, "{},*,*{},Late\n", 1. - late_penalty, student.directory_id)?;
-                } else {
-                    write!(file, "{},*,*1,\n", student.directory_id)?;
+            // Compute the new deadline
+            let deadline = due_date + Duration::seconds((hours * 3600) as i64);
+
+            deadlines.push((deadline, penalty));
+        }
+
+        deadlines
+    };
+
+    // Get output dir
+    let output_dir = args.value_of("output").unwrap();
+
+    // For each student, get their latest submission in each penalty period, as well as their
+    // activated submission (which may be included in the former collection as well)
+    let submission_candidates = {
+        let mut submission_candidates: HashMap<&Student, (&Submission, Vec<Option<&Submission>>)> = HashMap::new();
+
+        for student in roster.students.iter() {
+            // Get the student's active submission
+            if let Some(active) = submissions.get_active_submission(student) {
+                // Get the student's latest submission in each penalty period
+                let latest = deadlines.iter().map(|(d, _)| submissions.get_latest_submission(student, Some(d))).collect();
+
+                // Add to the collection
+                submission_candidates.insert(student, (active, latest));
+            }
+        }
+
+        submission_candidates
+    };
+
+    // Compare the canonical submission to all of these submissions, ensuring that the tests match
+    let canonical = {
+        // Find the canonical submission
+        let canonical_id = args.value_of("canonical").unwrap();
+        let canonical_submission = submissions.get_active_submission(roster.find_student_by_uid(canonical_id.to_owned()).expect("No submitter with given ID for canonical found")).expect("No canonical submission found");
+
+        // Make sure the score is 100
+        if canonical_submission.raw_score() != 1.0 {
+            panic!("Canonical submission did not receive full points.");
+        }
+
+        // Validate all other submissions against the canonical
+        let mut invalid_submissions = Vec::new();
+
+        for (_, (a, ls)) in submission_candidates.iter() {
+            if !a.validate_with_canonical(&canonical_submission) {
+                invalid_submissions.push(a);
+            }
+            for l in ls.iter() {
+                if let Some(l) = l {
+                    if !l.validate_with_canonical(&canonical_submission) {
+                        invalid_submissions.push(l);
+                    }
                 }
             }
         }
 
-        /* List tests for parts csv */
-        let mut file = File::create(format!("{}/parts.csv", args.value_of("output").unwrap()))?;
-    //    let canon_student = roster.0.iter().find(|s| s.name == args.value_of("canonical").unwrap()).unwrap();
-    //    let canon_submission = canon_student.submissions.iter().find(|s| s.was_activated).unwrap();
+        if invalid_submissions.len() > 0 {
+            // Write invalid submission IDs to file
+            let filename = format!("{}/invalid_submission_ids", output_dir);
+            let mut file = File::create(&filename).unwrap();
+            for invalid in invalid_submissions.iter() {
+                write!(file, "{}\n", invalid.id).unwrap();
+            }
+            panic!("Some submissions were invalid; IDs written to {}", filename);
+        }
 
-    //    let mut tests = canon_submission.tests.clone();
-        let mut tests = tests.clone();
+        canonical_submission
+    };
+
+    // Of the submissions collected above, find the best scoring one for each student.  In the case
+    // of a tie, prefer the active one, or the earliest submitted.
+    let best_submissions: HashMap<&Student, &Submission> = submission_candidates.into_iter().map(|(student, (a, ls))| {
+        let extension = extensions.find(student);
+        let (mut best, mut best_score) = (a, a.score(&deadlines, extension).unwrap());
+        for l in ls.iter() {
+            if let Some(l) = l {
+                let new_score = l.score(&deadlines, extension).unwrap();
+                if new_score > best_score {
+                    best = l;
+                    best_score = new_score;
+                }
+            }
+        }
+        (student, best)
+    }).collect();
+
+    // Generate the parts.csv
+    {
+        let mut file = File::create(format!("{}/parts.csv", output_dir)).unwrap();
+        let mut tests = canonical.tests.clone();
         tests.sort_by(|a, b| {
             a.number.partial_cmp(&b.number).unwrap()
         });
         for t in tests.iter() {
-            write!(file, "{},{}\n", t.name, t.max)?;
-        }
-    } else {
-        /* Check if the student has any submissions over 20% */
-        let mut file = File::create(format!("{}/gfa.csv", args.value_of("output").unwrap()))?;
-        for student in roster.0.iter() {
-            if student.passed_gfa() {
-                write!(file, "{},pass\n", student.directory_id)?;
-            } else {
-                write!(file, "{},fail\n", student.directory_id)?;
-            }
+            write!(file, "{},{}\n", t.name, t.max).unwrap();
         }
     }
 
-    Ok(())
+    // Generate the grades.csv
+    {
+        let mut file = File::create(format!("{}/grades.csv", output_dir)).unwrap();
+
+        for (_, submission) in best_submissions.iter() {
+            let penalty = submission.compute_penalty(&deadlines, extensions.find(submission.student)).unwrap();
+
+            if penalty < 1. {
+                write!(file, "{}", submission.to_string()).unwrap();
+
+                if penalty != 0. {
+                    write!(file, "{},*,*{},Late\n", submission.student.directory_id, 1. - penalty).unwrap();
+                } else {
+                    write!(file, "{},*,*1,\n", submission.student.directory_id).unwrap();
+                }
+            }
+        }
+    }
 }

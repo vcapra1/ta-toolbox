@@ -27,24 +27,18 @@ args:
         long: extensions
         value_name: FILE
         help: A CSV file of extensions, in the format UID,Hours
-    - late_period:
+    - deadline:
         short: l
-        long: late-period
-        value_name: HOURS
-        help: The additional time students had to submit projects for late credit
+        long: deadline
+        value_name: HOURS,PENALTY
+        help: Two comma-separated values, the number of hours beyond the deadline this penalty applies, and the penalty (0.0 is no penalty, 1.0 is full penalty)
         required: false
-        default_value: "24.0"
-    - late_penalty:
-        short: p
-        long: late-penalty
-        value_name: PENALTY
-        help: The penalty to apply to late submissions, expressed as a percentage (omit % sign)
-        default_value: "10.0"
+        multiple: true
     - canonical:
         short: c
         long: canonical
-        value_name: NAME
-        help: The name of the submitter of the canonical solution
+        value_name: UID
+        help: The UID of the submitter of the canonical solution (e.g. TA/Instructor)
         required: true
     - output:
         short: o
@@ -52,14 +46,7 @@ args:
         value_name: DIR
         help: Directory to put the output files in.
         required: true
-    - student:
-        short: i
-        long: student
-        value_name: UID
-        help: Specify a student for whom to calculuate the project grade. If omitted, all grades are computed
-        required: false
-        multiple: true
-    - gfa:
-        short: g
-        long: gfa
-        help: Run in GFA mode (output a list of students and whether or not they failed the GFA)
+#    - gfa:
+#        short: g
+#        long: gfa
+#        help: Run in GFA mode (output a list of students and whether or not they failed the GFA)

@@ -1,28 +1,20 @@
-//! Methods and data structures for parsing submission metadata and storing the results in an
-//! organized way, which will be more usable when computing the students' final grades for the
-//! project.
+//! Code for importing submission data from the yaml file produced by Gradescope.
 
-use chrono::{DateTime, Utc};
-use serde_yaml::Value;
+use crate::{roster::*, extensions::*};
 use std::fs::File;
+use serde_yaml::Value;
+use chrono::{DateTime, NaiveDateTime, Utc, Duration, TimeZone};
 
-/// Represents a single project submission, with all information necessary for final score
-/// computation.  Includes the time of the submission in UTC and a list of the test results.
-pub struct Submission {
-    pub submission_id: u64,
-    pub student_name: String,
-    pub student_id: String,
-    pub student_did: Option<String>,
-    pub time: DateTime<Utc>,
-    pub total_score: f64,
-    pub tests: Vec<TestCase>,
-    pub was_activated: bool,
+/// The types of errors that can be produced within and returned from this module.
+#[derive(Debug)]
+pub enum Error {
+    SubmissionReadError,
+    SubmissionFormatError(Option<u64>, usize),
+    InvalidDeadlineError,
 }
 
-/// Represents a run of a single test case for a particular submission.  Includes the name of the
-/// test, its number (for ordering), the score received by the submission, and the maximum number
-/// of points for this test case.
-#[derive(Clone)]
+// A single test case and result
+#[derive(Clone, Debug)]
 pub struct TestCase {
     pub name: String,
     pub number: f64,
@@ -30,293 +22,366 @@ pub struct TestCase {
     pub max: f64,
 }
 
-/// An error type for this module, which will be returned by the load method so errors can be
-/// handled further up.
+/// Represents a single submission of the project.
 #[derive(Debug)]
-pub enum Error {
-    YamlFileError(String),
-    YamlStructureError(String),
+pub struct Submission<'r> {
+    // The submission ID
+    pub id: u64,
+    // The student
+    pub student: &'r Student,
+    // Submission time
+    pub time: DateTime<Utc>,
+    // Individual test results
+    pub tests: Vec<TestCase>,
+    // Whether this was the active submission
+    pub active: bool,
 }
 
-/// Load the submissions from a file, and store all of the submissions found in the dest Vec.  This
-/// will add to dest, so the function can be called many times to accumulate submission information
-/// from many files.
-///
-/// Returns the number of submissions loaded on success, or an appropriate Error message on
-/// failure.  If there is a failure, all submissions that were already found will still be added to
-/// the dest Vec.
-pub fn load(dest: &mut Vec<Submission>, file: &str) -> Result<usize, Error> {
-    /* Open and parse the YAML file */
-    let yaml: Value = serde_yaml::from_reader(File::open(file)?)?;
-
-    /* Keep track of number added */
-    let mut count = 0;
-
-    if let Value::Mapping(mapping) = yaml {
-        /* Iterate over all of the active submissions */
-        for submission_set in mapping.into_iter() {
-            count += process_submissions(dest, submission_set)?;
-        }
-    } else {
-        Err(Error::YamlStructureError(String::from("YAML structure invalid: top-level should be a Mapping.")))?
-    }
-
-    Ok(count)
+/// A collection of submissions for a particular assigment.
+pub struct SubmissionSet<'r> {
+    roster: &'r Roster,
+    pub submissions: Vec<Submission<'r>>,
 }
 
-fn process_submissions(dest: &mut Vec<Submission>, (name, data): (Value, Value)) -> Result<usize, Error> {
-    /* Get the active submission id from the key */
-    let submission_id = if let Value::String(name) = name {
-        /* Check that the submission name follows the expected format */
-        if &name[0..11] == "submission_" {
-            /* Get the numerical part of the name as the id */
-            match &name[11..].parse::<u64>() {
-                Ok(id) => Ok(*id),
-                Err(_) => Err(Error::YamlStructureError(format!("YAML strucutre invalid: invalid submission name {}.", name))),
-            }
+impl <'r> Submission<'r> {
+    /// Convert the YAML results for a submission into a `Submission` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The submission ID
+    /// * `student` - The student whose submission this is
+    /// * `active` - Whether this was the active submission
+    /// * `submission_yaml` - YAML value containing the submission data
+    ///
+    /// # Errors
+    ///
+    /// If there is an error during deserialization, will return `SubmissionFormatError` with the
+    /// ID of the first invalid submission.
+    fn load(id: u64, student: &'r Student, active: bool, submission_yaml: &Value) -> Result<Submission<'r>, Error> {
+        // Get time of submission
+        let time = if let Some(Value::String(time)) = submission_yaml.get(":created_at") {
+            DateTime::<Utc>::from_utc(NaiveDateTime::parse_from_str(time, "%Y-%m-%d %H:%M:%S.%f Z").or(Err(Error::SubmissionFormatError(Some(id), 0)))?, Utc)
         } else {
-            Err(Error::YamlStructureError(format!("YAML strucutre invalid: invalid submission name {}.", name)))
-        }
-    } else {
-        Err(Error::YamlStructureError(String::from("YAML structure invalid: key for each submission group should be a String.")))
-    }?;
+            Err(Error::SubmissionFormatError(Some(id), 1))?
+        };
 
-    /* Get info about submitter */
-    let (student_name, student_id) = if let Some(Value::Sequence(submitters)) = data.get(":submitters") {
-        /* Get the first entry (there should only be one */
-        if let Value::Mapping(ref mapping) = submitters[0] {
-            match (mapping.get(&":name".into()), mapping.get(&":sid".into())) {
-                (Some(Value::String(name)), Some(Value::String(id))) => Ok((name.clone(), id.clone())),
-                _ => Err(Error::YamlStructureError(format!("Invalid \":submitters\" field for submission {}.", submission_id))),
-            }
-        } else {
-            Err(Error::YamlStructureError(format!("Empty \":submitters\" field for submission {}.", submission_id)))
-        }
-    } else {
-        Err(Error::YamlStructureError(format!("No \":submitters\" field for submission {}.", submission_id)))
-    }?;
-
-    /* Keep track of number added */
-    let mut count = 0;
-
-    /* Get active submission */
-    match process_submission(data.clone(), (student_name.clone(), student_id.clone()), Some(submission_id)) {
-        Ok(Some(mut active)) => {
-            active.was_activated = true;
-            dest.push(active);
-            count += 1;
-        },
-        Err(err) => {
-            eprintln!("error caught: {:?}", err);
-        },
-        _ => ()
-    }
-
-    /* Get the rest of the submissions */
-    if let Some(Value::Sequence(subs)) = data.get(":history") {
-        for sub in subs.iter() {
-            match process_submission(sub.clone(), (student_name.clone(), student_id.clone()), None) {
-                Ok(Some(submission)) => {
-                    dest.push(submission);
-                    count += 1;
-                },
-                Err(err) => {
-                    eprintln!("{:?}", err);
-                },
-                _ => ()
-            }
-        }
-    }
-
-    Ok(count)
-}
-
-fn process_submission(data: Value, (student_name, student_id): (String, String), submission_id: Option<u64>) -> Result<Option<Submission>, Error> {
-    /* Get the submission id */
-    let submission_id = if let Some(id) = submission_id {
-        Ok(id)
-    } else if let Some(Value::Number(id)) = data.get(":id") {
-        match id.as_u64() {
-            Some(id) => Ok(id),
-            None => Err(Error::YamlStructureError(format!("{} is not a valid submission id.", id))),
-        }
-    } else {
-        Err(Error::YamlStructureError(format!("Submission without an ID.")))
-    }?;
-
-    /* Check the status of the submission */
-    if let Some(Value::String(status)) = data.get(":status") {
-        if status != "processed" {
-            if status != "failed" {
-                eprintln!("[!] Irregular status on submission {}: {}", submission_id, status);
-            }
-            return Ok(None);
-        }
-    } else {
-        return Ok(None);
-    }
-
-    /* Check if the submission timed out */
-    if let Some(results) = data.get(":results") {
-        if let Some(Value::String(output)) = results.get("output") {
-            if output.contains("timed out") {
-                return Ok(None);
-            }
-        }
-    }
-
-    /* Get time of submission */
-    let time = if let Some(Value::String(time)) = data.get(":created_at") {
-        let mut time = time.clone();
-        /* Check for "Z" in time zone */
-        if &time[time.len() - 1..] == "Z" {
-            /* Replace the Z with +0000 */
-            time.pop();
-            time.push_str("+0000");
-            
-            match DateTime::parse_from_str(&time, "%Y-%m-%d %H:%M:%S.%f %z") {
-                Ok(dt) => Ok(dt.with_timezone(&Utc)),
-                Err(_) => Err(Error::YamlStructureError(format!("Invalid time format for submission {}: {}", submission_id, time))),
-            }
-        } else {
-            Err(Error::YamlStructureError(format!("Invalid time format for submission {}: {}", submission_id, time)))
-        }
-    } else {
-        Err(Error::YamlStructureError(format!("No \":created_at\" field for submission {}.", submission_id)))
-    }?;
-
-    /* Get score */
-    let score = if let Some(Value::Number(score)) = data.get(":score") {
-        if score.is_f64() {
-            Ok(score.as_f64().unwrap())
-        } else if score.is_i64() {
-            Ok(score.as_i64().unwrap() as f64)
-        } else if score.is_u64() {
-            Ok(score.as_u64().unwrap() as f64)
-        } else {
-            Err(Error::YamlStructureError(format!("Invalid score for submission {}", submission_id)))
-        }
-    } else {
-        Err(Error::YamlStructureError(format!("Invalid or missing score for submission {}", submission_id)))
-    }?;
-
-    /* Get test results */
-    let test_results = if let Some(cases) = data.get(":results") {
-        if let Some(Value::Sequence(cases)) = cases.get("tests") {
-            let mut err = None;
-
-            let test_results = cases.iter().map(|case| {
-                /* Get the name of the test case */
-                if let Some(Value::String(name)) = case.get("name") {
-                    let name = name.to_string();
-                    /* Get the number of the test case */
-                    if let Some(Value::String(number)) = case.get("number") {
-                        let number = number.to_string();
+        if let Some(results) = submission_yaml.get(":results") {
+            if let Some(Value::Sequence(tests)) = results.get("tests") {
+                // Parse tests
+                let tests: Result<Vec<_>, _> = tests.into_iter().map(|t| {
+                    if let (Some(Value::String(name)), Some(Value::String(number)), Some(Value::Number(score)), Some(Value::Number(max))) = (t.get("name"), t.get("number"), t.get("score"), t.get("max_score")) {
                         if let Ok(number) = number.parse::<f64>() {
-                            /* Get the score */
-                            if let Some(Value::Number(score)) = case.get("score") {
-                                if score.is_f64() {
-                                    let score = score.as_f64().unwrap();
-                                    /* Get the max score */
-                                    if let Some(Value::Number(max)) = case.get("max_score") {
-                                        if max.is_f64() {
-                                            let max = max.as_f64().unwrap();
-
-                                            /* Create the test case */
-                                            Some(TestCase { name, number, score, max })
-                                        } else {
-                                            err.replace(Error::YamlStructureError(format!("Invalid max_score field for test case on submission {}", submission_id)));
-                                            None
-                                        }
-                                    } else {
-                                        err.replace(Error::YamlStructureError(format!("No max_score field for test case on submission {}", submission_id)));
-                                        None
-                                    }
-                                } else {
-                                    err.replace(Error::YamlStructureError(format!("Invalid score field for test case on submission {}", submission_id)));
-                                    None
-                                }
+                            if score.is_f64() && max.is_f64() {
+                                Ok(TestCase {
+                                    name: name.to_string(),
+                                    number,
+                                    score: score.as_f64().unwrap(),
+                                    max: max.as_f64().unwrap(),
+                                })
                             } else {
-                                err.replace(Error::YamlStructureError(format!("No score field for test case on submission {}", submission_id)));
-                                None
+                                Err(Error::SubmissionFormatError(Some(id), 2))
                             }
                         } else {
-                            err.replace(Error::YamlStructureError(format!("Invalid number {} for test case on submission {}", number, submission_id)));
-                            None
+                            Err(Error::SubmissionFormatError(Some(id), 20))
                         }
                     } else {
-                        err.replace(Error::YamlStructureError(format!("No number field for test case on submission {}", submission_id)));
-                        None
+                        Err(Error::SubmissionFormatError(Some(id), 3))
                     }
-                } else {
-                    err.replace(Error::YamlStructureError(format!("No name field for test case on submission {}", submission_id)));
-                    None
-                }
-            }).collect::<Vec<_>>();
+                }).collect();
 
-            if let Some(err) = err {
-                Err(err)
+                Ok(Submission {
+                    id,
+                    student,
+                    time,
+                    tests: tests?,
+                    active,
+                })
             } else {
-                Ok(test_results.into_iter().map(|c| c.unwrap()).collect::<Vec<_>>())
+                Err(Error::SubmissionFormatError(Some(id), 4))?
             }
         } else {
-            Err(Error::YamlStructureError(format!("Invalid test results structure for submission {} (should be a Sequence).", submission_id)))
+            Err(Error::SubmissionFormatError(Some(id), 5))?
         }
-    } else {
-        Err(Error::YamlStructureError(format!("Missing test results for submission {}", submission_id)))
-    }?;
+    }
 
-    Ok(Some(Submission {
-        submission_id,
-        student_name,
-        student_id,
-        student_did: None,
-        time,
-        total_score: score,
-        tests: test_results,
-        was_activated: false,
-    }))
-}
+    /// Compute the total score of this submission using the assignment's due date and any
+    /// extensions given to this individual student.
+    ///
+    /// # Arguments
+    ///
+    /// * `deadlines` - A list of 2-tuples, each containing the deadline and the respective penalty
+    /// for submitting before that deadline.  The first element of this list is the normal due
+    /// date, and must have a penalty of 0.  There must be at least one element.  The penalty
+    /// should be given as a float between 0 and 1, where 0 indicates no penalty, and 1 indicates
+    /// no credit (maximum penalty).
+    /// * `extension` - An extension, if applicable, to apply to this submission.  Passed as an
+    /// Option.
+    ///
+    /// # Errors
+    ///
+    /// If the given set of deadlines is invalid (as described above), will return
+    /// `InvalidDeadlineError`.
+    pub fn score(&self, deadlines: &Vec<(DateTime<Utc>, f64)>, extension: Option<&Extension>) -> Result<f64, Error> {
+        Ok(self.raw_score() * (1. - self.compute_penalty(deadlines, extension)?))
+    }
 
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
-        Error::YamlFileError(format!("{}", err))
+    /// Compute the penalty for this submission
+    ///
+    /// # Arguments
+    ///
+    /// * `deadlines` - A list of 2-tuples, each containing the deadline and the respective penalty
+    /// for submitting before that deadline.  The first element of this list is the normal due
+    /// date, and must have a penalty of 0.  There must be at least one element.  The penalty
+    /// should be given as a float between 0 and 1, where 0 indicates no penalty, and 1 indicates
+    /// no credit (maximum penalty).
+    /// * `extension` - An extension, if applicable, to apply to this submission.  Passed as an
+    /// Option.
+    ///
+    /// # Errors
+    ///
+    /// If the given set of deadlines is invalid (as described above), will return
+    /// `InvalidDeadlineError`.
+    pub fn compute_penalty(&self, deadlines: &Vec<(DateTime<Utc>, f64)>, extension: Option<&Extension>) -> Result<f64, Error> {
+        // Make sure the first deadline is valid
+        if deadlines.len() == 0 || deadlines[0].1 != 0. {
+            return Err(Error::InvalidDeadlineError);
+        }
+
+        // Figure out which period this submission falls under
+        for (deadline, penalty) in deadlines.iter() {
+            // Allow a 5-minute buffer, just like Gradescope does, and add given extension.
+            let deadline = if let Some(ref extension) = extension {
+                *deadline + Duration::seconds(300) + Duration::seconds((extension.hours * 3600) as i64)
+            } else {
+                *deadline + Duration::seconds(300)
+            };
+        
+            if self.time <= deadline {
+                return Ok(*penalty);
+            }
+        }
+
+        // The submission did not fall before any deadlines, so the penalty is 100%.
+        Ok(1.)
+    }
+
+    /// Compute the raw total score of this submission, not taking into account any deadlines or
+    /// extensions.
+    pub fn raw_score(&self) -> f64 {
+        let (score, max) = self.tests.iter().fold((0., 0.), |(a_s, a_m), x| (a_s + x.score, a_m + x.max));
+        score / max
+    }
+
+    /// Validate this submission against a canonical submission.  This ensures the tests names and
+    /// max scores are identical between the two submissions.  Returns true if this is a valid
+    /// submission, false if not.
+    ///
+    /// # Arguments
+    ///
+    /// * `canonical` - The canonical submission against which to validate
+    pub fn validate_with_canonical(&self, canonical: &Submission) -> bool {
+        let mut tests = Vec::new();
+
+        for t in self.tests.iter() {
+            tests.push((t.name.clone(), t.number.clone(), t.max.clone()));
+        }
+
+        for t in canonical.tests.iter() {
+            let k = (t.name.clone(), t.number.clone(), t.max.clone());
+            if tests.contains(&k) {
+                tests.remove(tests.iter().position(|x| *x == k).unwrap());
+            } else {
+                return false;
+            }
+        }
+
+        tests.len() == 0
     }
 }
 
-impl From<serde_yaml::Error> for Error {
-    fn from(err: serde_yaml::Error) -> Self {
-        Error::YamlStructureError(format!("{}", err))
+impl <'r> SubmissionSet<'r> {
+    /// Get an empty submission set.
+    ///
+    /// # Arguments
+    ///
+    /// * `roster` - The roster of students which will be used to assign a student to each
+    pub fn new(roster: &'r Roster) -> SubmissionSet<'r> {
+        SubmissionSet {
+            roster,
+            submissions: Vec::new(),
+        }
     }
-}
 
-impl std::error::Error for Error {
-    fn description(&self) -> &str {
-        "Error loading submissions"
+    /// Given the path to the submission_metadata.yml file downloaded from Gradescope, loads all of
+    /// the submissions into `Submission` structs and adds them all to this `SubmissionSet`.
+    ///
+    /// # Arguments
+    ///
+    /// * `file` - The path to the YAML file, which is named submission_metadata.yml in the export
+    /// submission.
+    ///
+    /// # Errors
+    ///
+    /// If the YAML file cannot be read (for example, if it doesn't exist or the appropriate
+    /// permissions are not set), will return `SubmissionReadError`.  If there is an error during
+    /// deserialization, will return `SubmissionFormatError` with the ID of the first invalid
+    /// submission (or None if the error was not related to a particular submission).
+    pub fn load(&mut self, file: &str) -> Result<(), Error> {
+        // Open the file (this will fail if the file doesn't exist or we can't read it).
+        let file = File::open(file).or(Err(Error::SubmissionReadError))?;
+
+        // Parse the YAML file into a Value structure
+        let yaml: Value = serde_yaml::from_reader(file).or(Err(Error::SubmissionFormatError(None, 6)))?;
+
+        // Check that the data is the correct type (i.e. a mapping)
+        if let Value::Mapping(mapping) = yaml {
+            for (name, data) in mapping.into_iter() {
+                // Extract the active submission id
+                let submission_id = if let Value::String(name) = name {
+                    if &name[0..11] == "submission_" {
+                        *&name[11..].parse::<u64>().or(Err(Error::SubmissionFormatError(None, 7)))?
+                    } else {
+                        Err(Error::SubmissionFormatError(None, 8))?
+                    }
+                } else {
+                    Err(Error::SubmissionFormatError(None, 9))?
+                };
+
+                // Check status
+                if let Some(Value::String(status)) = data.get(":status") {
+                    if status != "processed" {
+                        if status != "failed" {
+                            eprintln!("Testing not finished on {}", submission_id);
+                        }
+                        continue;
+                    }
+                } else {
+                    Err(Error::SubmissionFormatError(Some(submission_id), 21))?
+                }
+
+                // Get associated student
+                let student = if let Some(Value::Sequence(submitters)) = data.get(":submitters") {
+                    // There should only be one entry
+                    if submitters.len() != 1 {
+                        Err(Error::SubmissionFormatError(Some(submission_id), 10))?
+                    }
+
+                    // Get the first entry
+                    if let Value::Mapping(ref mapping) = submitters[0] {
+                        if let Some(Value::String(id)) = mapping.get(&":sid".into()) {
+                            if let Some(student) = self.roster.find_student_by_uid(id.clone()) {
+                                student
+                            } else {
+                                eprintln!("No student found with id {}", id);
+                                continue
+                            }
+                        } else {
+                            Err(Error::SubmissionFormatError(Some(submission_id), 12))?
+                        }
+                    } else {
+                        Err(Error::SubmissionFormatError(Some(submission_id), 13))?
+                    }
+                } else {
+                    Err(Error::SubmissionFormatError(Some(submission_id), 14))?
+                };
+
+                // Parse the rest of the submission and add to list
+                self.submissions.push(Submission::load(submission_id, student, true, &data)?);
+
+                // Process sub-entries
+                if let Some(Value::Sequence(history)) = data.get(":history") {
+                    for data in history.into_iter() {
+                        // Get the submission id
+                        if let Some(Value::Number(submission_id)) = data.get(":id") {
+                            let submission_id = submission_id.as_i64().ok_or(Error::SubmissionFormatError(None, 15))? as u64;
+
+                            // Make sure its done
+                            if let Some(Value::String(status)) = data.get(":status") {
+                                if status != "processed" {
+                                    if status != "failed" {
+                                        eprintln!("Testing not finished on {}", submission_id);
+                                    }
+                                    continue;
+                                }
+                            } else {
+                                Err(Error::SubmissionFormatError(Some(submission_id), 21))?
+                            }
+
+                            // Parse the rest of the submission and add to list
+                            self.submissions.push(Submission::load(submission_id, student, false, data)?);
+                        } else {
+                            Err(Error::SubmissionFormatError(Some(submission_id), 16))?
+                        }
+                    }
+                } else {
+                    Err(Error::SubmissionFormatError(Some(submission_id), 17))?
+                }
+            }
+
+            Ok(())
+        } else {
+            return Err(Error::SubmissionFormatError(None, 18));
+        }
     }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> {
+    /// Find the most recent submission for a particular student before the given timestamp, if
+    /// provided.  If no timestamp is provided, the most recent submission will be returned.  Will
+    /// return None if no applicable submissions are found.
+    ///
+    /// # Arguments
+    ///
+    /// * `student` - The student whose submissions we should look for
+    /// * `before` - If provided, a timestamp for which only submissions prior to it will be
+    /// considered
+    pub fn get_latest_submission<Z: TimeZone>(&self, student: &Student, before: Option<&DateTime<Z>>) -> Option<&Submission> {
+        let mut latest: Option<&Submission> = None;
+
+        for submission in self.submissions.iter() {
+            if submission.student == student && (before.is_none() || submission.time <= *before.unwrap()) {
+                if let Some(l) = latest {
+                    // Compare to existing result
+                    if submission.time > l.time {
+                        latest = Some(submission);
+                    }
+                } else {
+                    latest = Some(submission);
+                }
+            }
+        }
+
+        latest
+    }
+
+    /// Get the active submission for a particular student.  Will return None if the student has no
+    /// submissions.
+    ///
+    /// # Arguments
+    ///
+    /// * `student` - The student whose submissions we should look for
+    pub fn get_active_submission(&self, student: &Student) -> Option<&Submission> {
+        for submission in self.submissions.iter() {
+            if submission.student == student && submission.active {
+                return Some(submission);
+            }
+        }
+
         None
     }
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{:?}", self))
-    }
-}
+impl ToString for Submission<'_> {
+    fn to_string(&self) -> String {
+        let mut string = String::new();
 
-impl std::fmt::Display for Submission {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut tests = self.tests.clone();
         tests.sort_by(|a, b| {
             a.number.partial_cmp(&b.number).unwrap()
         });
 
         for t in tests {
-            write!(f, "{},{},{},\n", self.student_did.clone().unwrap(), t.name, t.score)?;
+            string.push_str(&format!("{},{},{},\n", self.student.directory_id, t.name, t.score));
         }
 
-        Ok(())
+        string
     }
 }

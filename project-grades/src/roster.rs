@@ -1,154 +1,80 @@
+//! Code for reading the students' information from the roster file and processing it for easy
+//! lookup and storage of basic information.
+
 use std::fs::File;
-use serde::Deserialize;
-use crate::submissions::{self, *};
-use chrono::{DateTime, Utc, Duration};
 
-pub struct Roster(pub Vec<Student>);
-
-#[derive(Deserialize)]
-pub struct Student {
-    #[serde(rename = "Name")]
-    pub name: Option<String>,
-    #[serde(rename = "UID")]
-    pub university_id: String,
-    #[serde(rename = "DID")]
-    pub directory_id: String,
-    #[serde(skip)]
-    pub extension: f32,
-    #[serde(skip)]
-    pub submissions: Vec<submissions::Submission>,
-}
-
+/// The types of errors that can be produced within and returned from this module.
 #[derive(Debug)]
 pub enum Error {
-    UserNotFound(String),
+    RosterReadError,
+    RosterFormatError(usize),
+}
+
+/// Represents a single student, with the information from the roster CSV file.
+#[derive(serde::Deserialize, Hash, Debug)]
+pub struct Student {
+    // The student's name, which is optional.
+    #[serde(rename = "Name")]
+    pub name: Option<String>,
+    // The student's University ID.
+    #[serde(rename = "UID")]
+    pub uid: String,
+    // The student's Directory ID (their login username).
+    #[serde(rename = "DID")]
+    pub directory_id: String,
+}
+
+/// Represents the course roster which contains all of the students.  Basically imported
+/// automatically from the CSV file.
+pub struct Roster {
+    pub students: Vec<Student>,
 }
 
 impl Roster {
-    pub fn load(file: &str) -> Result<Roster, Box<dyn std::error::Error>> {
-        let mut rdr = csv::Reader::from_reader(File::open(file)?);
-        Ok(Roster(rdr.deserialize().map(|record| record.unwrap()).collect()))
+    /// Given the name of the CSV file containing the roster, loads all of the students into an
+    /// instance of `Roster`.  Note that the format of the roster is a CSV with the columns
+    /// Name,UID,DID (or just UID,DID as the Name column is optional, and not used in this
+    /// implementation).  The corresponding header must be included at the top of the file.
+    ///
+    /// # Arguments
+    ///
+    /// * `file` - The name of the roster file.
+    ///
+    /// # Errors
+    ///
+    /// If the roster file cannot be read (for example, if it doesn't exist or the appropriate
+    /// permissions are not set), will return `RosterReadError`.  If there is an error during
+    /// deserialization, will reuturn `RosterFormatError` with the line number of the first error.
+    pub fn load(file: &str) -> Result<Roster, Error> {
+        // Open the file (this will fail if the file doesn't exist or we can't read it).
+        let file = File::open(file).or(Err(Error::RosterReadError))?;
+
+        // Create a CSV reader over this file.
+        let mut rdr = csv::Reader::from_reader(file);
+
+        // Map each row into an instance of Student.
+        let students: Result<Vec<_>, _> = rdr.deserialize().enumerate().map(|(i, row)| row.or(Err(Error::RosterFormatError(i + 1)))).collect();
+
+        // Create a Roster with all of those entries.
+        Ok(Roster {
+            students: students?,
+        })
     }
 
-    pub fn add_submission(&mut self, mut submission: submissions::Submission) -> Result<(), Error> {
-        let id = submission.student_id.clone();
+    /// Lookup a Student by their university id (UID).
+    ///
+    /// # Arguments
+    ///
+    /// * `uid` - The UID of the student to look for.
+    pub fn find_student_by_uid(&self, uid: String) -> Option<&Student> {
+        self.students.iter().find(|s| s.uid == uid)
+    }
+}
 
-        if let Some(student) = self.0.iter_mut().find(|st| st.university_id == id) {
-            submission.student_did = Some(student.directory_id.clone());
-            student.submissions.push(submission);
-            Ok(())
-        } else {
-            Err(Error::UserNotFound(id))
-        }
+impl PartialEq for Student {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid
     }
 }
 
-impl std::error::Error for Error {
-    fn description(&self) -> &str {
-        "Error associating submission with student"
-    }
-
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        None
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{:?}", self))
-    }
-}
-
-impl Student {
-    pub fn passed_gfa(&self) -> bool {
-        /* Find any submission over 20% */
-        for sub in self.submissions.iter() {
-            if sub.total_score > 20f64 {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    pub fn best_submission(&self, late_penalty: f64, late_period: f64, due_date: DateTime<Utc>) -> Option<(&Submission, bool)> {
-        /* Get this student's personal due date (by applying the extension) */
-        let due_date = due_date + Duration::minutes((self.extension * 60.0) as i64 + 5);
-
-        /* Get this student's late due date */
-        let late_due_date = due_date + Duration::minutes((late_period * 60.0) as i64);
-
-        /* Partition the submissions into groups based on the time they were submitted */
-        let mut on_time_subs = Vec::new();
-        let mut late_subs = Vec::new();
-        let mut active_subs = Vec::new();
-
-        for sub in self.submissions.iter() {
-            if sub.time <= due_date {
-                on_time_subs.push(sub);
-            } else if sub.time <= late_due_date {
-                late_subs.push(sub);
-            }
-
-            if sub.was_activated {
-                active_subs.push(sub);
-            }
-        }
-
-        /* Find the latest on-time submission */
-        on_time_subs.sort_by(|a, b| {
-            a.time.partial_cmp(&b.time).unwrap()
-        });
-        late_subs.sort_by(|a, b| {
-            a.time.partial_cmp(&b.time).unwrap()
-        });
-
-        /* Get all final candidates */
-        let mut candidates = Vec::new();
-        if let Some(s) = on_time_subs.pop() {
-            candidates.push(s);
-        }
-        if let Some(s) = late_subs.pop() {
-            candidates.push(s);
-        }
-        candidates.append(&mut active_subs);
-
-        /* Get the final candidate with the highest score */
-        candidates.sort_by(|a, b| {
-            /* Get the score for the submission */
-            let a_score = {
-                if a.time <= due_date {
-                    a.total_score
-                } else if a.time <= late_due_date {
-                    a.total_score * (1.0 - late_penalty)
-                } else {
-                    0.0
-                }
-            };
-
-            let b_score = {
-                if b.time <= due_date {
-                    b.total_score
-                } else if b.time <= late_due_date {
-                    b.total_score * (1.0 - late_penalty)
-                } else {
-                    0.0
-                }
-            };
-
-            a_score.partial_cmp(&b_score).unwrap()
-        });
-
-        if let Some(best) = candidates.pop() {
-            if best.time <= due_date {
-                Some((best, false))
-            } else if best.time <= late_due_date {
-                Some((best, true))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-}
+impl Eq for Student {}
