@@ -283,9 +283,9 @@ impl Eq for Grader {}
 
 impl fmt::Debug for Stats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        /* TODO : sort by points graded */
+        /* Sort by points graded */
         let mut graders = self.graders.clone();
-        graders.sort_by(|a, b| b.n_points_graded.partial_cmp(&a.n_points_graded).unwrap());
+        //graders.sort_by(|a, b| b.n_points_graded.partial_cmp(&a.n_points_graded).unwrap());
 
         /* Figure out longest name */
         let len = self.graders.iter().fold(0, |acc, g| acc.max(g.name.len()));
