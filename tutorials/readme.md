@@ -2,7 +2,7 @@
 
 ## Exams
 
-* [Tracking grading stats](gradscope-stats.md)
+* [Tracking grading stats](gradescope-stats.md)
 
 #### Online Exams
 
