@@ -48,20 +48,23 @@ fn main() {
         deadlines.push((due_date, 0.));
 
         // Add the remaining deadlines
-        for deadline in args.values_of("deadline").unwrap() {
-            let parts: Vec<_> = deadline.split(",").collect();
-            if parts.len() != 2 {
-                panic!("Invalid format for arg \"deadline\": {}", deadline);
+        match args.values_of("deadline") {
+            Some(deadline_args) => for deadline in deadline_args {
+                let parts: Vec<_> = deadline.split(",").collect();
+                if parts.len() != 2 {
+                    panic!("Invalid format for arg \"deadline\": {}", deadline);
+                }
+
+                // Get the hours and penalty
+                let hours = parts[0].parse::<u32>().unwrap();
+                let penalty = parts[1].parse::<f64>().unwrap();
+
+                // Compute the new deadline
+                let deadline = due_date + Duration::seconds((hours * 3600) as i64);
+
+                deadlines.push((deadline, penalty));
             }
-
-            // Get the hours and penalty
-            let hours = parts[0].parse::<u32>().unwrap();
-            let penalty = parts[1].parse::<f64>().unwrap();
-
-            // Compute the new deadline
-            let deadline = due_date + Duration::seconds((hours * 3600) as i64);
-
-            deadlines.push((deadline, penalty));
+            _ => ()
         }
 
         deadlines
@@ -79,7 +82,12 @@ fn main() {
             // Get the student's active submission
             if let Some(active) = submissions.get_active_submission(student) {
                 // Get the student's latest submission in each penalty period
-                let latest = deadlines.iter().map(|(d, _)| submissions.get_latest_submission(student, Some(d))).collect();
+                let ext = if let Some(ref extension) = extensions.find(student) {
+                    Duration::seconds(300) + Duration::seconds((extension.hours * 3600) as i64)
+                } else {
+                    Duration::seconds(300)
+                };
+                let latest = deadlines.iter().map(|(d, _)| submissions.get_latest_submission(student, Some(&(*d + ext)))).collect();
 
                 // Add to the collection
                 submission_candidates.insert(student, (active, latest));

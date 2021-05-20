@@ -89,13 +89,15 @@ impl <'r> Submission<'r> {
                     }
                 }).collect();
 
-                Ok(Submission {
+                let s = Submission {
                     id,
                     student,
                     time,
                     tests: tests?,
                     active,
-                })
+                };
+
+                Ok(s)
             } else {
                 Err(Error::SubmissionFormatError(Some(id), 4))?
             }
